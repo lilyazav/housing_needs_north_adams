@@ -729,7 +729,82 @@ write.csv(table_2_18, "table_2_18.csv")
 t2_20_loc <- places
 t2_20_geoids <- c(geo_ids, 25003)
 
+# S2503_C01_024E - median housing costs, just curious about this. 
+# get_acs_vec(vars_vec= c("S2503_C01_024"))
+# $911
+
 # number of renter households - 
+
+# number of owner households - 
+# Making less than 20k S2503_C03_028
+# 20 to 35k S2503_C03_032
+# 35 to 50k S2503_C03_036
+# 50 to 75k S2503_C03_040
+# 75 or more S2503_C03_044
+
+owner_vars <- c("S2503_C03_028", "S2503_C03_032",
+                "S2503_C03_036", "S2503_C03_040", 
+                "S2503_C03_044")
+renter_vars <- c("S2503_C05_028", "S2503_C05_032",
+                 "S2503_C05_036", "S2503_C05_040", 
+                 "S2503_C05_044")
+
+num_owners <- "DP04_0046"
+num_renters <-"DP04_0047"
+
+table_2_20 <- data.frame()
+
+get_t2_20_row <- function(i, year = 2022){
+  if(t2_20_loc[i] == "Berkshire County"){
+    geography <- "county"
+  } else {
+    geography <- "county subdivision"
+  }
+  
+  hh_nums <-  get_acs_vec(geoid = t2_20_geoids[i], 
+                          year = year,
+                          geography = geography,
+                          vars_vec = c(num_renters, num_owners))
+  
+  renter_cost_burdened <- get_acs_vec(geoid = t2_20_geoids[i], 
+                                     geography = geography,
+                                     year = year,
+                                     vars_vec = renter_vars) %>% sum
+    
+  owner_cost_burdened <- get_acs_vec(geoid = t2_20_geoids[i], 
+                           geography = geography,
+                           year = year,
+                           vars_vec = owner_vars) %>% sum
+  
+  row <- c(t2_20_loc[i], hh_nums[1], renter_cost_burdened, 
+           renter_cost_burdened/hh_nums[1] * 100, 
+           hh_nums[2], owner_cost_burdened, 
+           owner_cost_burdened/hh_nums[2] *100)
+  return(row)
+}
+
+# I checked against 2018, and it matches up to the old Housing Needs Assessment,
+# except for Berkshire county - everything is slightly off
+
+for(i in 1:length(t2_20_geoids)){
+  table_2_20 <- rbind(table_2_20, get_t2_20_row(i, 2022))
+}
+
+names(table_2_20) <- c("Location", "Number of Rental Households", 
+                       "Renters Burdened", "% Renters Burdened", "Number of Owner Households", "Owners Burdened", "% Owners Burdened")
+
+### Figure 2.4 Prevalence of Housing Cost Burden
+write.csv(table_2_20, "table_2_20.csv")
+
+fig_2_4 <- table_2_20 %>% select(Location, '% Renters Burdened', '% Owners Burdened')
+
+fig_2_4_long <- gather(fig_2_4, type, percent, '% Renters Burdened':'% Owners Burdened')
+
+plot <- ggplot(fig_2_4_long, aes(factor(Location, level = t2_20_loc), as.numeric(percent), fill=type))
+plot <- plot + geom_bar(stat = "identity", position = 'dodge') + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+plot
+
 
 
 ##
