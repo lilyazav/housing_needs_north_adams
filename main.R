@@ -653,12 +653,13 @@ bucket_vars = c("DP03_0052", "DP03_0053", "DP03_0054",
                 "DP03_0055", "DP03_0056", "DP03_0057", 
                 "DP03_0058", "DP03_0059", "DP03_0060",
                 "DP03_0061")
+upper_limits <-  c(9999, 14999, 24999, 34999, 
+                   49999, 74999, 100000, 150000, 
+                   199999, Inf)
 
 income_buckets <- data.frame( 
   var.names = bucket_vars,
-  upper.limts = c(9999, 14999, 24999, 34999, 
-                  49999, 74999, 100000, 150000, 
-                  199999, Inf))
+  upper.limts = upper_limits)
 
 table_2_18 <- data.frame()
 
@@ -818,9 +819,11 @@ low_income <- paste0(1+ na_ami_24 * .5, " - ", na_ami_24 * .8)
 very_low_income <- paste0(na_ami_24 * .3, " - ", na_ami_24 * .5)
 extremely_low_income <- paste0("Below ", na_ami_24* .3)
 
-table_2_21a <- data.frame(Income.Category = c("Middle Income", "Moderate Income",
-                                              "Low Income", "Very Low Income", 
-                                              "Extremely Low Income"),
+income_categories <- c("Middle Income", "Moderate Income",
+                      "Low Income", "Very Low Income", 
+                      "Extremely Low Income")
+
+table_2_21a <- data.frame(Income.Category = income_categories,
                           Percent.AMI = c("120%", "100%", "80%", "50%", 
                                           "Under 30%"), 
                           Income.Range = c(middle_income, moderate_income, 
@@ -832,12 +835,166 @@ table_2_21a <- data.frame(Income.Category = c("Middle Income", "Moderate Income"
 
 write.csv(table_2_21a, "table_2_21a.csv")
 
-##
-##
-##
-## Skipping - to go back to
+### Table 2.21b Affordable Housing Supply Analysis for North Adams
+# Total households is very similar to 2.18 calculations, except that they use median 
+# household income for a two-person household, whereas this is just AMI
 
-### Table 3.1
+top_limit_per <- c(1.2, 1, .8, .5, .3)
+affordable_monthly_housing <- c()
+
+for(i in top_limit_per){
+  affordable_monthly_housing <- c(affordable_monthly_housing, (i * na_ami_24 * .3)/12)
+}
+
+total_households_res <- get_acs_vec(vars_vec = bucket_vars)
+
+# Just (barely) modified function for 2.18, using income_buckets from there
+get_total_households <- function(res){
+  income_lim <- rev(top_limit_per) * na_ami_24
+  hhs <- data.frame(c(0, 0, 0, 0, 0))
+  
+  j <- 1
+  
+  for(i in 1:length(bucket_vars)){
+    if(income_lim[j] > income_buckets$upper.limts[i]){
+      hhs[j,1] = hhs[j,1] + res[i]
+    } else {
+      distance <- income_buckets$upper.limts[i] - income_buckets$upper.limts[i -1] -1
+      per <- (income_lim[j] - income_buckets$upper.limts[i -1])/distance
+      hhs[j,1] = hhs[j,1] + (per * res[i])
+      if(j == length(income_lim)){
+        break
+      } else {
+        j <- j + 1
+        hhs[j, 1] = (1 - per) * res[i]
+      }
+    }
+  }
+  
+  return(hhs[,1])
+}
+
+total_hh <- get_total_households(total_households_res)
+
+# B25063_027 - no cash rent - exclude! In the old housing needs assessment, 
+# they exclude no cash rent, and I'm not sure why/how, and why this wouldn't
+# fall under Less than 100
+# B25063_003 - Less than 100
+# B25063_004 - 100 to 149
+# B25063_005 - 150 to 199
+# B25063_006 - 200 to 249
+# B25063_007 - 250 to 299
+# B25063_008  - 300 to 349
+# B25063_009 - 350 to 399
+# B25063_010 - 400 to 449
+# B25063_011 - 450 to 499
+# B25063_012 - 500 to 549
+# B25063_013 - 550 to 599
+# B25063_014 - 600 to 649
+# B25063_015 - 650 to 699
+# B25063_016 - 700 to 749
+# B25063_017 - 750 to 799
+# B25063_018 - 800 to 899
+# B25063_019 - 900 to 999
+# B25063_020 - 1,000 to 1,249
+# B25063_021 - 1,250 to 1,499
+# B25063_022 - 1,500 to 1,999
+# B25063_023 - 2,000 to 2,499
+# B25063_024 - 2,500 to 2,999
+# B25063_025 - 3,000 to $3,499
+# B25063_026 - 3,500 or more 
+
+rent_vars <- c("B25063_003", "B25063_004", "B25063_005",
+               "B25063_006", "B25063_007", "B25063_008", "B25063_009",
+               "B25063_010", "B25063_011", "B25063_012", "B25063_013",
+               "B25063_014", "B25063_015", "B25063_016", "B25063_017",
+               "B25063_018", "B25063_019", "B25063_020", "B25063_021",
+               "B25063_022", "B25063_023", "B25063_024", "B25063_025",
+               "B25063_026")
+
+rent_upper <- c(100, 149, 199, 249, 299, 349, 399, 449, 499, 549, 599, 649, 699, 
+                749, 799, 899, 999, 1249, 1499, 1999, 2499, 2999, 3499, Inf)
+
+# res_18 <- get_acs_vec(vars_vec = rent_vars, year = 2018)
+# tes_18 <- get_affordable_units(rent_buckets, res_18)
+# it's very slightly off for 2018.
+# 1177 in VLI, instead of 980; and 13 in middle, instead of 11. 
+
+rent_buckets <- data.frame(vars = rent_vars, upper.limits = rent_upper)
+
+get_affordable_units <- function(buckets, res){
+  cost_limits <- rev(affordable_monthly_housing)
+  # cost limits for 2018 below
+  # cost_limits <- c(24270, 40449, 64709, 80899, 97079) * .3 * (1/12)
+  units <- data.frame(c(0, 0, 0, 0, 0))
+  
+  j <- 1
+  
+  for(i in 1:length(buckets$vars)){
+    if(cost_limits[j] > buckets$upper.limits[i]){
+      units[j,1] = units[j,1] + res[i]
+    } else {
+      distance <- buckets$upper.limits[i] - buckets$upper.limits[i -1] -1
+      per <- (cost_limits[j] - buckets$upper.limits[i -1])/distance
+      units[j,1] = units[j,1] + (per * res[i])
+      if(j == length(cost_limits)){
+        break
+      } else {
+        j <- j + 1
+        units[j, 1] = (1 - per) * res[i]
+      }
+    }
+  }
+  
+  return(units[,1])
+}
+
+rent_bucket_res <- get_acs_vec(vars_vec = rent_vars, year = 2022)
+affordable_rent_res <- get_affordable_units(rent_buckets, rent_bucket_res)
+
+# Mortgage amts
+# B25087_003 - Less than 200
+# B25087_004 - 200 to 299
+# B25087_005 - 300 to 399
+# B25087_006 - 400 to 499
+# B25087_007 - 500 to 599
+# B25087_008 - 600 to 699
+# B25087_009 - 700 to 799
+# B25087_010 - 800 to 899
+# B25087_011 - 900 to 999
+# B25087_012 - 1000 to 1249
+# B25087_013 - 1250 to 1499
+# B25087_014 - 1500 to 1999
+# B25087_015  - 2000 to 2499
+# B25087_016 - 2500 to 2999
+# B25087_017- 3000 to 3499
+# B25087_018 - 3500 to 3999
+# B25087_019 - 4000 or more
+owner_vars <- c("B25087_003", "B25087_004", "B25087_005", "B25087_006", "B25087_007",
+                "B25087_008", "B25087_009", "B25087_010", "B25087_011", "B25087_012",
+                "B25087_013", "B25087_014", "B25087_015", "B25087_016", "B25087_017",
+                "B25087_018", "B25087_019")
+mort_upper <- c(200, 299, 399, 499, 599, 699, 799, 899, 999, 1249, 1499, 1999, 
+                2499, 2999, 3499, 3999, Inf)
+mort_buckets <- data.frame(vars = owner_vars, upper.limits = mort_upper)
+
+owner_bucket_res <- get_acs_vec(vars_vec = owner_vars, year = 2022)
+affordable_mort_res <- get_affordable_units(mort_buckets, owner_bucket_res)
+
+tot_units <- rev(affordable_rent_res) + rev(affordable_mort_res)
+
+# Need to add a totals row 
+table_2_21b <- data.frame(Income.Category = income_categories,
+                          Affordable.Monthly.Housing.Costs = affordable_monthly_housing,
+                          Affordable.Rental.Units.Available = rev(affordable_rent_res),
+                          Affordable.Homeownership.Units.Available = rev(affordable_mort_res), 
+                          Total.Affordable.Units.Available = tot_units, 
+                          Total.Number.of.Households = rev(total_hh),
+                          Estimated.Affordable.Housing = tot_units - rev(total_hh))
+
+write.csv(table_2_21b, "table_2_21b.csv")
+
+### Table 3.1 Overview of Rental Units
 
 housing_type <- c("Owner-Occupied", "Renter-Occupied", "Total Occupied Units")
 t_3_1_vars <- c("S2504_C03_001", "S2504_C05_001", "S2504_C01_001")
