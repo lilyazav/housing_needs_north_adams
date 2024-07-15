@@ -805,7 +805,32 @@ plot <- plot + geom_bar(stat = "identity", position = 'dodge') +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 plot
 
+### Table 2.21a Definition of Income Categories
+# North Adams Median Family income - HUD just gives the same number for each city in Berkshire county, 
+# excluding Pittsfield, and a few others
+# 2022 is 92,100
+# 2024 is 105,700
 
+na_ami_24 <- 105700
+middle_income <- paste0(1 + na_ami_24, " - ", na_ami_24 * 1.2)
+moderate_income <- paste0(1 + na_ami_24 * .8, " - ", na_ami_24)
+low_income <- paste0(1+ na_ami_24 * .5, " - ", na_ami_24 * .8)
+very_low_income <- paste0(na_ami_24 * .3, " - ", na_ami_24 * .5)
+extremely_low_income <- paste0("Below ", na_ami_24* .3)
+
+table_2_21a <- data.frame(Income.Category = c("Middle Income", "Moderate Income",
+                                              "Low Income", "Very Low Income", 
+                                              "Extremely Low Income"),
+                          Percent.AMI = c("120%", "100%", "80%", "50%", 
+                                          "Under 30%"), 
+                          Income.Range = c(middle_income, moderate_income, 
+                                           low_income, very_low_income, 
+                                           extremely_low_income))
+
+# 2019 AMI for North Adams is 78900, but that doesn't line up with the numbers in 2.21a
+# 80,899 looks like the number being used. 
+
+write.csv(table_2_21a, "table_2_21a.csv")
 
 ##
 ##
