@@ -1012,3 +1012,99 @@ table_3_1 <- data.frame(Housing.Type = housing_type,
 write.csv(table_3_1, "table_3_1.csv")
 
 ### Table 3.2 Number of Rental Units in Each Buildings
+# S2504_C01_002 - 1 unit, detached 
+# S2504_C01_003 - 1 unit, attached
+# S2504_C05_008 - mobile home
+
+# S2504_C01_004 - 2 units
+# S2504_C01_005 - 3 or 4 apts
+
+# S2504_C01_006 - 5- 9 units
+
+# S2504_C01_007 - 10 + units
+# Total Units
+
+building_type_vars <- c("S2504_C05_002", "S2504_C05_003",
+                        "S2504_C05_004", "S2504_C05_005",
+                        "S2504_C05_006", "S2504_C05_007",
+                        "S2504_C05_008")
+
+acs_2018_res <- get_acs_vec(vars_vec = building_type_vars, 
+                            year= 2018)
+
+acs_2022_res <- get_acs_vec(vars_vec = building_type_vars, 
+                            year= 2022)
+
+acs_2018 <- c(acs_2018_res[1] + acs_2018_res[2]  + acs_2018_res[7],
+              acs_2018_res[3] + acs_2018_res[4],
+              acs_2018_res[5], acs_2018_res[6])
+acs_2022 <- c(acs_2022_res[1] + acs_2022_res[2] + acs_2022_res[7],
+              acs_2022_res[3] + acs_2022_res[4],
+              acs_2022_res[5], acs_2022_res[6])
+
+acs_2018 <- c(acs_2018, sum(acs_2018))
+tot_units_22 = sum(acs_2022)
+acs_2022 <- c(acs_2022, tot_units_22)
+
+table_3_2 <- data.frame(
+  building_type = c("Single-family Units", "2-4 Units", "5-9 Units",
+                    "10+ Units", "Total Units"),
+  acs.2018 = acs_2018,
+  acs.2022 = acs_2022,
+  Percent.Change = percent_change(acs_2018, acs_2022), 
+  Percent.of.Total.Units.2022 = acs_2022/tot_units_22 * 100)
+
+write.csv(table_3_2, "table_3_2.csv")
+
+### Table 3.3 Age of Renter-Occupied Housing
+year_built_vars <- c("B25036_014", "B25036_015", "B25036_016", 
+                     "B25036_017", "B25036_018", "B25036_019", 
+                     "B25036_020", "B25036_021", "B25036_022", 
+                     "B25036_023")
+year_built <- c("2020 or later", "2010 to 2019", 
+                "2000 to 2009", "1990 to 1999",
+                "1980 to 1989", "1970 to 1979",
+                "1960 to 1969", "1950 to 1959",
+                "1940 to 1949", "1939 or earlier", "Total Units")
+
+# 2018 test - test checks out
+# acs_res <- get_acs_vec(vars_vec = year_built_vars, year = 2018)
+num_units <-  acs_res <- get_acs_vec(vars_vec = year_built_vars, year = 2022)
+tot_units <- sum(num_units)
+num_units <- c(num_units, tot_units)
+
+table_3_3 <- data.frame(Year.Rental.Unit.Built = year_built,
+                        Number.of.Units = num_units, 
+                        Percent.of.Total = num_units/tot_units * 100)
+
+write.csv(table_3_3, "table_3_3.csv")
+
+### Table 3.4 Household Tenure for Renters
+Year_Renter_Moved_In <- c("2021 or later", "2018 to 2020", "2010 to 2017", 
+                          "2000 to 2009", "1990 to 1999", "1989 or Earlier")
+
+Year_Renter_Moved_In_Vars <- c("B25038_010", "B25038_011", "B25038_012",
+                               "B25038_013", "B25038_014", "B25038_015")
+
+num_renters <- get_acs_vec(vars_vec = Year_Renter_Moved_In_Vars, year = 2022)
+
+table_3_4 <- data.frame(Year.Renter.Moved.In = Year_Renter_Moved_In,
+                        Number.of.Renters = num_renters,
+                        Percent.of.Total = num_renters/sum(num_renters) * 100)
+
+write.csv(table_3_4, "table_3_4.csv")
+
+### Table 3.5 Rental Vacancy Rate
+
+# B25004_002 - total vacant rentals
+# S2504_C05_001 - renter-occupied units
+table_3_5_vars <- c("B25004_002", "S2504_C05_001")
+
+res_18 <- get_acs_vec(vars_vec = table_3_5_vars, year = 2018)
+res_22 <- get_acs_vec(vars_vec = table_3_5_vars, year = 2022)
+
+table_3_5 <- data.frame( var= c("Total vacant rental units", "% of all rental units vacant"),
+                         acs.2018 = c(res_18[1], res_18[1]/res_18[2] * 100),
+                         acs.2022 = c(res_22[1], res_22[1]/res_22[2] * 100))
+
+table_3_5 <- write.csv(table_3_5, "table_3_5.csv")
