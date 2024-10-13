@@ -1,4 +1,4 @@
-table_*.csv
+data/table_*.csv
 *.png
 census_api_key.txt
 .Rhistory

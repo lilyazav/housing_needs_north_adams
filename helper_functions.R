@@ -7,21 +7,17 @@ dhc_var[grep("Median", dhc_var$label, ignore.case =T),]
 
 s1701 <- acs_var[grep("S1701", acs_var$name, ignore.case =T),]
 
-get_acs_vec <- function(geoid = 2500346225, vars_vec, dataset = "acs5", geography= "county subdivision",
-                        year = 2022) {
+get_acs_vec <- function(geoid = geo_id, vars_vec, dataset = "acs5", geography= "county subdivision",
+                        yr = year, cnty = county) {
   acs_vec <- c()
-  if (geography == "county subdivision"){
-    census_res <- get_acs(geography = "county subdivision", variables = vars_vec,
-                          state = "MA", county = "Berkshire", year = year)
-  }
-  
-  if (geography == "county") {
-    census_res <- get_acs(geography = "county", variables = vars_vec,
-                          state = "MA", 
-                          county = "Berkshire",
-                          year = year)
-  }
-  
+  if (geography == "state"){
+    census_res <- get_acs(geography = "state", variables = vars_vec,
+                          state = "MA", year = yr)
+  } else {
+    census_res <- get_acs(geography = geography, variables = vars_vec,
+                          state = "MA", county = cnty, year = yr)
+  } 
+
   location_res <- filter(census_res, GEOID==geoid)
   
   for(i in 1:length(vars_vec)){
@@ -34,3 +30,12 @@ get_acs_vec <- function(geoid = 2500346225, vars_vec, dataset = "acs5", geograph
 percent_change = function(old, new) {
   return((new - old)/old * 100)
 }
+
+
+# Getting var names
+# B vars
+# https://api.census.gov/data/2022/acs/acs5/groups/B25118.html
+# S vars
+# https://api.census.gov/data/2022/acs/acs5/subject/groups/S2504.html
+# DP vars
+# https://api.census.gov/data/2022/acs/acs5/profile/groups/DP04.html
