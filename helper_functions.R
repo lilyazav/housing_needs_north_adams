@@ -1,16 +1,18 @@
-pl_var <- load_variables(2020, dataset = c("pl"))
-dhc_var <- load_variables(2020, dataset = c("dhc"))
-dp_var <- load_variables(2020, dataset = c("dp"))
-acs_var <- load_variables(2022, dataset = c("acs5"))
-
-dhc_var[grep("Median", dhc_var$label, ignore.case =T),]
-
-s1701 <- acs_var[grep("S1701", acs_var$name, ignore.case =T),]
+# pl_var <- load_variables(2020, dataset = c("pl"))
+# dhc_var <- load_variables(2020, dataset = c("dhc"))
+# dp_var <- load_variables(2020, dataset = c("dp"))
+# acs_var <- load_variables(year, dataset = c("acs5"))
+# dhc_var[grep("Median", dhc_var$label, ignore.case =T),]
+# s1701 <- acs_var[grep("S1701", acs_var$name, ignore.case =T),]
 
 get_acs_vec <- function(geoid = geo_id, vars_vec, dataset = "acs5", geography= "county subdivision",
                         yr = year, cnty = county) {
+  
   acs_vec <- c()
-  if (geography == "state"){
+  
+  if(dataset == "decennial") {
+    census_res <- get_decennial(geography = geography, variables = vars_vec, state = "MA", county = cnty, year = yr)
+  } else if (geography == "state"){
     census_res <- get_acs(geography = "state", variables = vars_vec,
                           state = "MA", year = yr)
   } else {
@@ -20,8 +22,14 @@ get_acs_vec <- function(geoid = geo_id, vars_vec, dataset = "acs5", geography= "
 
   location_res <- filter(census_res, GEOID==geoid)
   
-  for(i in 1:length(vars_vec)){
-    acs_vec <- c(acs_vec, filter(location_res, variable == vars_vec[i])$estimate) 
+  if(dataset == "decennial"){
+    for(i in 1:length(vars_vec)){
+      acs_vec <- c(acs_vec, filter(location_res, variable == vars_vec[i])$value) 
+    }
+  } else {
+    for(i in 1:length(vars_vec)){
+      acs_vec <- c(acs_vec, filter(location_res, variable == vars_vec[i])$estimate) 
+    }
   }
   
   return (acs_vec)

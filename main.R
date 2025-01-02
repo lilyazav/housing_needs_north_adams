@@ -1,21 +1,29 @@
 library(tidycensus)
+# https://walker-data.com/tidycensus/articles/basic-usage.html
 library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(sf)
 library(stringr)
 library(reshape2)
+library(httr)
+library(rjson)
 
-# https://walker-data.com/tidycensus/articles/basic-usage.html
+#
+#
+# 
+# Global Variables
 
 key <- readr::read_file("census_api_key.txt")
 census_api_key(key)
 
+hud_key <- readr::read_file("hud_api_key.txt")
+
 focus_city <- "North Adams"
 county <- "Berkshire"
-year <- 2022
+year <- 2023
 census_year <- 2020
-comparison_year <- 2018
+comparison_year <- 2019
 places <- c("North Adams", "Williamstown", "Clarksburg", "Florida", 
             "Savoy", "Adams", "New Ashford", "Berkshire County")
 # geo_ids for all the cities, not including Berkshire County - can get it manually by running the Table 2.1
@@ -25,15 +33,19 @@ geo_ids <- c(2500346225, 2500379985, 2500314010, 2500324120, 2500360225,
 geo_id <- 2500346225
 county_geo_id <- 25003
 state_geo_id <- 25
+#
+#
+#
+#
 
 #### TO MAKE THIS GENERALIZABLE - Fix currently hard-coded
 ### Table 2.1 - census years 1960 -2010
 ### Table 2.2 - census year 2010
 ### Table 2.3 is from UMass Donahue, just need to get it manually
+### Table 2.4 Race vars expanded, 2022 to 2023
 ### Table 2.6 is a different datasource
 ### Table 2.8 and Table 2.9 is a different datasource, numbers manually retrieved
 ### Table 2.17 year buckets will be different for different years
-### Table 2.19 data manually retrieved from a different source
 ### Table 2.18 income buckets might be different
 ### Table 2.21a is based on manually pulled AMI
 ### Table 2.21b rent and mortgage cost buckets may change, also uses AMI from 2.21a
@@ -42,7 +54,9 @@ state_geo_id <- 25
 ### Table 3.6 Income buckets might change
 ### Table 3.7 Rent amount buckets might change. I separated median rent from the table itself
 ### Table 3.10 SHI is from external data 
-### ---------------
+### Table 4.6 I just copied 1990 -2010 data, also I used 2020 ACS, not census
+### Table 4.9 Income buckets may change
+### Table 4.10 and 4.11, Income buckets may change
 ### Table 5.2 I used ACS 2018 for comparison year, will want to use census year 
 ### (more accurate), when there's a big enough gap, ie 2020 census compared to 2025 ACS.
 ### https://api.census.gov/data/2020/dec/dp/variables.html
@@ -60,40 +74,36 @@ state_geo_id <- 25
 ## 2. Demographics
 ### Table 2.1 Population Change, 1960 - 2024
 
-# get 2020 population data for all the selected cities in the county
+year_census <- c()
+
+# get Census Year population data for all the selected cities in the county
 population <- get_decennial(geography = "county subdivision", variables = "P1_001N",
                             state = "MA", county = county, year = census_year)
 
-year_census <- c()
-
 for(i in 1:length(geo_ids)){
-  year_census <- c(year_census, population$value[population$GEOID == geo_ids[i]])
+  population_res <- get_acs_vec(geoid = geo_ids[i], vars_vec = c("P1_001N"), dataset = "decennial",
+                              cnty = county, yr = census_year)
+  year_census <- c(year_census, population_res)
 }
 
-# The population for 
-population_county <- get_decennial(geography = "county", variables = "P1_001N", state = "MA",
-                            county = county, year = census_year)
+# get Census Year population data for Berkshire County
+population_county <- get_acs_vec(geoid = county_geo_id, vars_vec = c("P1_001N"), dataset = "decennial",
+                                 geography = "county", cnty = county, yr = census_year)
+year_census <- c(year_census, population_county)
 
-year_census <- c(year_census, population_county$value)
-
-# Get 2022
-# Using 5-year ACS estimates ending in 2022 
-# 1 year estimates are only available for places with over 65,000 people, so they must
-# have also used 5 -year data
-
-population_current <- get_acs(geography = "county subdivision", variables = "DP05_0001",
-                            state = "MA", year = year)
-
+# Get Current Year data for all locations
 year_current <- c()
 
+# Get Current Year population for all cities. 
 for(i in 1:length(geo_ids)){
-  year_current <- c(year_current, population_current$estimate[population_current$GEOID == geo_ids[i]])
+  population_current <- get_acs_vec(geoid = geo_ids[i], geography = "county subdivision", vars_vec = c("DP05_0001"), yr = year)
+  year_current <- c(year_current, population_current)
 }
 
-population_current_county <- get_acs(geography = "county", variables = "DP05_0001",
-                         state = "MA", county = county, year = year)
-
-year_current <- c(year_current, population_current_county$estimate)
+# Get Current Year population for county
+county_population_current <- get_acs_vec(geoid = county_geo_id, geography = "county", vars_vec = c("DP05_0001"),
+                            cnty = county, yr = year)
+year_current <- c(year_current, county_population_current)
 
 table_2_1 <- data.frame(location =  places, 
                         y_1960 = c(19905, 7322, 1741, 569, 277, 12391, 165, 142135),
@@ -103,7 +113,7 @@ table_2_1 <- data.frame(location =  places,
                         y_2000 = c(14691, 8418, 1682, 676, 705, 8809, 247, 134953),
                         y_2010 = c(13708, 7754, 1702, 752, 692, 8485, 228, 131219),
                         y_2020 = year_census,
-                        y_2022 = year_current)
+                        y_current = year_current)
 
 write.csv(table_2_1,"data/table_2_1.csv")
 
@@ -171,7 +181,7 @@ median_age_na <- filter(median_age, GEOID==geo_id)$value
 tot_census_year = c(zero_to_19, twenty_to_34, thirty5_to_54, fifty5_plus, total_pop, median_age_na)
 per_census_year = tot_census_year[1:length(tot_census_year) -1]/total_pop * 100
 
-# get ACS data for 2022
+# get ACS data for 2023
 # variables - https://api.census.gov/data/2018/acs/acs5/profile/groups/DP05.html
 
 # 0 to 19, 
@@ -183,7 +193,7 @@ per_census_year = tot_census_year[1:length(tot_census_year) -1]/total_pop * 100
 # over 55
 # DP05_0013E, DP05_0014E, DP05_0015E, DP05_0016E, DP05_0017E
 
-# zero to 19, 2022
+# zero to 19, 2023
 zero_to_19_current <- get_acs(geography = "county subdivision", 
                          variables = c("DP05_0005E", "DP05_0006E", "DP05_0007E", "DP05_0008E"),
                          state = "MA",
@@ -230,7 +240,7 @@ median_age_current <- get_acs(geography = "county subdivision",
 median_age_current_val <- filter(median_age_current, GEOID==geo_id)$estimate
 
 tot_current <- c(zero_to_19_current_val, twenty_to_34_current_val, thirty5_to_54_current_val, 
-              over_fifty5_current_val, tot_current, median_age_current_val)
+              over_fifty5_current_val, total_current, median_age_current_val)
 
 per_current <- tot_current[1:length(tot_current) -1]/total_current * 100
 
@@ -240,8 +250,13 @@ per_change_census_to_current <- percent_change(tot_census_year, tot_current)
 age_cohorts <- c("0-19 years old", "20-34 years old",
                  "35-54 years old", "55+ years old")
 
+tot_2010 <-  c(3359, 2945, 3506, 3898, 13708, 38.9)
+total_2010 <- sum(tot_2010[1:(length(tot_2010)- 2)])
+per_2010 <- tot_2010[1:length(tot_2010) -1]/total_2010 * 100
+
 table_2_2 <- data.frame(age_cohort = c(age_cohorts, "Total Population", "Median Age"),
-                        tot_2010 = c(3359, 2945, 3506, 3898, 13708, 38.9),
+                        tot_2010 = tot_2010,
+                        per_2010 = c(per_2010, NA),
                         tot_census_year = tot_census_year, 
                         per_census_year = c(per_census_year, NA), 
                         tot_current_year = tot_current, 
@@ -261,52 +276,57 @@ thirty5_to_54_2035 = 588 + 660 + 676 + 723
 fifty5_plus_2035 = 692 + 747 + 768 + 865 + 786 + 528 + 345
 sum_2035 = zero_to_19_2035 + twenty_to_34_2035 + thirty5_to_54_2035 + fifty5_plus_2035
 proj_2035 = c(zero_to_19_2035, twenty_to_34_2035, thirty5_to_54_2035, fifty5_plus_2035, sum_2035)
+per_pop_2035 = proj_2035/sum_2035*100
 
-per_change_2035 = (proj_2035 - tot_2022[1:5])/tot_2022[1:5] * 100
+per_change_2035 = percent_change(tot_current[1:5], proj_2035)
 
 table_2_3 <- data.frame(age_cohort = c(age_cohorts, "Total Population"), 
-                        tot_2022[1:5], 
+                        tot_current[1:5], 
                         proj_2035 = proj_2035,
+                        per_pop_2035 = per_pop_2035,
                         per_change_2035 = per_change_2035 )
 
 write.csv(table_2_3, "data/table_2_3.csv")
 
 ### Table 2.4 Race
+# Different vars for 2023/2019
 # white alone - DP05_0037E
 # Black alone - DP05_0038E
-# Hispanic/Latino - DP05_0071E
+# Hispanic/Latino, any race - DP05_0076E /  DP05_0071
 # American Indian or Alaska Native alone - DP05_0039E
-# Asian alone - DP05_0044E
-# Native Hawaiian or Other Pacific Islander Alone - DP05_0052E
-# Some other race alone - DP05_0057E
-# Two or more races - DP05_0058E
+# Asian alone - DP05_0047E / DP05_0044E
+# Native Hawaiian or Other Pacific Islander Alone - DP05_0055E / DP05_0052E
+# Some other race alone - DP05_0060E / DP05_0057E
+# Two or more races - DP05_0061E / DP05_0058E
 
-race_vars <- c("DP05_0037", "DP05_0038", "DP05_0071", 
-               "DP05_0039", "DP05_0044", "DP05_0052", 
-               "DP05_0057", "DP05_0058")
-county_race <- get_acs(geography = "county subdivision", 
-                            variables = race_vars,
-                            state = "MA",
-                            county = county,
-                            year = year)
+race_vars <- c("DP05_0037", "DP05_0038", "DP05_0076", "DP05_0039", "DP05_0047", "DP05_0055", 
+               "DP05_0060", "DP05_0061")
+race_res <- get_acs_vec(vars_vec = race_vars)
+# the variables 
+race_vars_comp <- c("DP05_0037", "DP05_0038", "DP05_0071", "DP05_0039", "DP05_0044", "DP05_0052", 
+                    "DP05_0057", "DP05_0058")
+race_res_comp <- get_acs_vec(vars_vec = race_vars_comp, yr = comparison_year)
 
-city_race <- filter(county_race, GEOID==geo_id)
+# Getting percent from variables, 
+percent_vars <- paste0(race_vars, "P")
+percent_res <- get_acs_vec(vars_vec = percent_vars)
+percent_vars_comp <- paste0(race_vars_comp, "P")
+percent_res_comp <- get_acs_vec(vars_vec = percent_vars_comp,  yr = comparison_year)
 
-race_current_year <- c()
-
-for(i in 1:length(race_vars)){
-  race_current_year <- c(race_current_year, filter(city_race, variable == race_vars[i])$estimate) 
-}
-
-total <- sum(race_current_year)
-race_current_year <- c(race_current_year, total)
+total <- get_acs_vec(vars_vec = c("DP05_0033"))
+total_comp <- get_acs_vec(vars_vec = c("DP05_0033"), yr = comparison_year)
+race_current_year <- c(race_res, total)
+race_comp_year <- c(race_res_comp, total_comp)
 
 table_2_4 <- data.frame(race = c("White alone", "Black or African American alone", 
-                                 "Hispanic or Latino", "American Indian or Alaskan Native alone",
+                                 "Hispanic or Latino, Any Race", "American Indian or Alaskan Native alone",
                                  "Asian alone", "Native Hawaiian or Other Pacific Islander alone",
                                  "Some other race alone", "Two or more races", "Total"),
+                        race_comp_year = race_comp_year,
+                        per_comp = c(percent_res_comp, 100),
                         race_current_year = race_current_year,
-                        per_total = race_current_year/total * 100)
+                        per_total = c(percent_res, 100),
+                        percent_change = percent_change(race_comp_year, race_current_year))
 
 write.csv(table_2_4, "data/table_2_4.csv")
 
@@ -386,6 +406,7 @@ table_2_7 <- data.frame(Income.Level = income_levels,
 
 write.csv(table_2_7, "data/table_2_7.csv")
 
+## We added a figure in 2.1
 ### Figure 2.1 Households by Income in North Adams
 fig_2_1 <- data.frame(Income.Level = income_levels, 
                       hh_comp = income_hh_comp, 
@@ -395,7 +416,9 @@ fig_2_1 <- fig_2_1[1:10, ]
 fig_2_1_long <- gather(fig_2_1, year, total, hh_comp:hh_current)
 plot <- ggplot(fig_2_1_long, aes(factor(Income.Level, level = income_levels[1:10]) , total, fill=year))
 plot <- plot + geom_bar(stat = "identity", position = 'dodge') + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+  scale_fill_discrete(name = "Years", labels = c("2019", "2023")) + 
+  theme(axis.text.x = element_text(angle = 85, vjust = 0, hjust = 0)) + 
+  ylab("Households") + xlab("Income Levels")
 plot
 
 ### Table 2.8 Average Weekly Wage by Job Type
@@ -470,22 +493,28 @@ write.csv(table_2_11, "data/table_2_11.csv")
 ### Table 2.12 Homeowner- Versus Renter-Occupied Housing
 
 # DP04_0002
-type_housing <- c("Owern-occupied", "Renter-occupied")
+type_housing <- c("Owner-occupied", "Renter-occupied")
+# number of households - owner- and renter-occupied
 h_v_r_vars <- c("DP04_0046", "DP04_0047")
 h_v_r_vec <- get_acs_vec(vars_vec = h_v_r_vars)
 
+# average household size - owner- and renter-occupied
 household_size_vars <- c("DP04_0048", "DP04_0049")
 household_size_vec <- get_acs_vec(vars_vec = household_size_vars)
 
+# median hh income - owner and renter
 med_hh_income_vars <- c("S2503_C03_013", "S2503_C05_013")
 med_hh_income_vec <- get_acs_vec(vars_vec = med_hh_income_vars)
 
 # I tested against 2018 acs to ensure that I'm using the same metrics
+# S2503_C03_028 is owner-occupied households making less than 20k, that pay 30% or more on housing
+# The rest are different income brackets, owners, spending 30% or more
 cost_burdened_owner_vars <- c("S2503_C03_028", "S2503_C03_032",
                                  "S2503_C03_036", "S2503_C03_040", 
                                  "S2503_C03_044")
 cost_burdened_owner_vec <- get_acs_vec(vars_vec = cost_burdened_owner_vars)
 
+# these are different renter income brackets, spending 30% or more
 cost_burdened_renter_vars <- c("S2503_C05_028", "S2503_C05_032", 
                                "S2503_C05_036", "S2503_C05_040", 
                                "S2503_C05_044")
@@ -512,36 +541,36 @@ vac_status_vars <- c("B25004_002", "B25004_003", "B25004_004", "B25004_005",
                      "B25004_006", "B25004_007", "B25004_008", "B25004_001")
 
 vac_status_vec <- get_acs_vec(vars_vec = vac_status_vars)
+vac_status_comp_vec <- get_acs_vec(vars_vec = vac_status_vars, yr = comparison_year)
 
 table_2_13 <- data.frame(Vacancy.Status = vac_status, 
+                         Comp.Year.Units = vac_status_comp_vec, 
+                         Per.Comp.Year = vac_status_comp_vec/vac_status_comp_vec[8] * 100,
                          Num.Housing.Units = vac_status_vec, 
-                         Per.Housing.Units = vac_status_vec/vac_status_vec[8]*100)
+                         Per.Housing.Units = vac_status_vec/vac_status_vec[8]*100,
+                         Per.Change = percent_change(vac_status_comp_vec, vac_status_vec))
 
 write.csv(table_2_13, "data/table_2_13.csv")
 
-### Figure 2.2 Residential Use - to do later
+### Figure 2.3 Residential Use - to do later
 parcels <- st_read("~/North Adams Properties/data/joined_data.shp")
 use_codes <-c(101, 102, 103, 104, 105, 109, 111, 112, 013)
 parcels <- parcels %>% filter(USE_CODE %in% use_codes)
 
-plot <- ggplot(parcels, aes(x=USE_CODE)) + geom_histogram(stat="count") +
+plot <- ggplot(parcels, aes(x=USE_CODE)) + geom_histogram(stat="count", fill = "#00BFC4") +
   scale_x_discrete(labels=c("Single-family", "Condominium", 
   "Mobile home", "Two-family", "Three-family", "Multiple Houses", "Four- to Eight Units", 
   "More than eight units", "Multi-use res/com")) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(axis.text.x = element_text(angle = 89, vjust = 1, hjust=1)) +
   geom_text(
     stat = "count",
-    aes(
-      label = after_stat(count)
-    ),
+    aes(label = after_stat(count)),
     position = position_dodge(),
     color = "black",
-    size = 4,
-    vjust = -0.2
-  )
+    size = 3,
+    vjust = -0.2)  + xlab("Housing Units") + ylab("Count")
 
 ### Table 2.14 
-# 2018 combined 10 - 19 and 20 +, I left them separate
 struc_type <- c("1 unit, detached", "1 unit, attached", "2 units", 
                 "3 to 4 units", "5 to 9 units", "10 - 19 units", 
                 "20+ units", "Mobile Home", 
@@ -549,7 +578,7 @@ struc_type <- c("1 unit, detached", "1 unit, attached", "2 units",
 struc_vars <- c("DP04_0007", "DP04_0008", "DP04_0009", "DP04_0010", 
                 "DP04_0011", "DP04_0012", "DP04_0013", "DP04_0014", 
                 "DP04_0015", "DP04_0006")
-struc_vec_comp <- get_acs_vec(vars_vec = struc_vars, year = comparison_year)
+struc_vec_comp <- get_acs_vec(vars_vec = struc_vars, yr = comparison_year)
 struc_vec_current <- get_acs_vec(vars_vec = struc_vars)
 
 table_2_14 <- data.frame(Structure.Type = struc_type, 
@@ -567,7 +596,7 @@ num_bedrooms_vars <- c("DP04_0039", "DP04_0040", "DP04_0041",
                        "DP04_0042", "DP04_0043", "DP04_0044", 
                        "DP04_0038")
 
-num_bedrooms_vec_comp <- get_acs_vec(vars_vec = num_bedrooms_vars, year = comparison_year)
+num_bedrooms_vec_comp <- get_acs_vec(vars_vec = num_bedrooms_vars, yr = comparison_year)
 # Need to combine DP04_0039E (no bedrooms), DP04_0040 (1 bedroom)
 num_bedrooms_vec_comp <- c(num_bedrooms_vec_comp[1] + num_bedrooms_vec_comp[2], 
                          num_bedrooms_vec_comp[3:length(num_bedrooms_vec_comp)])
@@ -618,6 +647,22 @@ table_2_16 <- data.frame(Age.of.Householder = age_of_hh,
 
 write.csv(table_2_16, "data/table_2_16.csv")
 
+table_2_16_b <- data.frame(Age.of.Householder = age_of_hh, 
+                           Percent.Renters =age_of_hh_renters_vec/(age_of_hh_renters_vec+ age_of_hh_owners_vec) *100, 
+                           Percent.Owners = age_of_hh_owners_vec/(age_of_hh_renters_vec+ age_of_hh_owners_vec) * 100)
+write.csv(table_2_16_b, "data/table_2_16b.csv")
+
+## Need to check figure #s
+## Figure 2.4 of Householder
+fig_2_4_long <- gather(table_2_16[c(1:7),c(1,3,5)], household_type, total, Number.of.Renters:Number.of.Owners)
+
+plot <- ggplot(fig_2_4_long, aes(factor(Age.of.Householder, level = age_of_hh[1:7]), total, fill=household_type))
+plot <- plot + geom_bar(stat = "identity", position = 'stack') + 
+  scale_fill_discrete(name = "Household Type", labels = c("Renters", "Owners")) + 
+  theme(axis.text.x = element_text(angle = 85, vjust = 0, hjust = 0)) + 
+  ylab("Age") + xlab("Number of Households")
+plot
+
 ### Table 2.17 Household Tenure
 year_hh_moved_in <- c("2021 or later", "2018 to 2020", "2010 to 2017", 
                       "2000 to 2009", "1990 to 1999", "1989 or before")
@@ -659,15 +704,20 @@ table_2_17 <- data.frame(Year.Householder.Moved.In = year_hh_moved_in,
                          Percent.Owner.Households = year_hh_moved_in_owner_per_vec)
 write.csv(table_2_17, "data/table_2_17.csv")
 
+### Table 2.18 computed later, because it relies on 2.19
 ### Table 2.19 FY 2022 Income Limits, Berkshire County
 # https://www.huduser.gov/portal/datasets/il/il2022/2022summary.odn
 
+query <- paste0("https://www.huduser.gov/hudapi/public/il/data/", geo_id, "?year=", year)
+getData <- GET(url = query, add_headers(Authorization = paste("Bearer ", hud_key)))
+data <- content(getData)[[1]]
+
 income_category <- c("extremely low income, 30%", "very low income, 50%", "low income, 80%")
 
-median_family_income <- 92100
-eli_30 <- c(19800,	22600,	25450,	28250,	32470,	37190,	41910,	46630)
-vli_50 <- c(32950,	37650,	42350,	47050,	50850,	54600,	58350,	62150)
-li_80 <- c(52750,	60250,	67800,	75300,	81350,	87350,	93400,	99400)
+median_family_income <- data[8]
+eli_30 <- data[10][[1]] %>% unlist
+vli_50 <- data[9][[1]] %>% unlist
+li_80 <- data[11][[1]] %>% unlist
 
 table_2_19 <- rbind(c("Income Category", 1:8),
   c(income_category[1], eli_30),  
@@ -698,7 +748,7 @@ bucket_vars = c("DP03_0052", "DP03_0053", "DP03_0054",
                 "DP03_0058", "DP03_0059", "DP03_0060",
                 "DP03_0061")
 upper_limits <-  c(9999, 14999, 24999, 34999, 
-                   49999, 74999, 100000, 150000, 
+                   49999, 74999, 99999, 149999, 
                    199999, Inf)
 
 income_buckets <- data.frame( 
@@ -748,10 +798,12 @@ get_2_18_row <- function(i, eli, vli, li, yr = year){
   
   tot_hh <- sum(hh_acs)
   hhs_by_income <- get_hh_nums(eli, vli, li, hh_acs)
+  all_li <- hhs_by_income[1] + hhs_by_income[2] + hhs_by_income[3]
   
   return(c(loc, tot_hh, hhs_by_income[1], hhs_by_income[1]/tot_hh * 100,
            hhs_by_income[2], hhs_by_income[2]/tot_hh * 100,
-           hhs_by_income[3], hhs_by_income[3]/tot_hh * 100 ))
+           hhs_by_income[3], hhs_by_income[3]/tot_hh * 100,
+           all_li, all_li/tot_hh * 100))
   
 }
 
@@ -769,6 +821,22 @@ for(i in 1:length(t218_locations)){
 }
 
 write.csv(table_2_18, "data/table_2_18.csv")
+
+### Figure 2.LowIncome
+fig_li <- table_2_18[2:8,c(1,4, 6, 8)]
+
+names(fig_li) <- c("location", "eli", "vli", "li")
+fig_li_long <- gather(fig_li, income, percent, 2:4)
+fig_li_long <- fig_li_long %>% mutate(income = factor(income, levels = c("li", "vli", "eli")))
+
+plot <- ggplot(fig_li_long, aes(factor(location, level = location %>% unique), as.numeric(percent), fill= income))
+plot <- plot + geom_bar(stat = "identity", position = 'stack') + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  scale_fill_discrete(name = "Income", labels = c("Low Income", "Very Low Income",
+                                                  "Extremely Low Income")) + 
+  theme(axis.text.x = element_text(angle = 85, vjust = 0, hjust = 0)) + 
+  xlab("Locations") + ylab("Percent")
+plot
 
 ### Table 2.20 Prevalence of Housing Cost Burden
 t2_20_loc <- places
@@ -794,8 +862,8 @@ renter_vars <- c("S2503_C05_028", "S2503_C05_032",
                  "S2503_C05_036", "S2503_C05_040", 
                  "S2503_C05_044")
 
-num_owners <- "DP04_0046"
-num_renters <-"DP04_0047"
+num_owners <- "S2503_C03_001"
+num_renters <-"S2503_C05_001"
 
 table_2_20 <- data.frame()
 
@@ -821,10 +889,15 @@ get_t2_20_row <- function(i, yr = year){
                            yr = year,
                            vars_vec = owner_vars) %>% sum
   
+  tot_hh <- hh_nums[1]+hh_nums[2]
+  tot_burdened <- renter_cost_burdened + owner_cost_burdened
+  per_burdened <- tot_burdened/tot_hh*100
+  
   row <- c(t2_20_loc[i], hh_nums[1], renter_cost_burdened, 
            renter_cost_burdened/hh_nums[1] * 100, 
            hh_nums[2], owner_cost_burdened, 
-           owner_cost_burdened/hh_nums[2] *100)
+           owner_cost_burdened/hh_nums[2] *100,
+           tot_hh, tot_burdened, per_burdened)
   return(row)
 }
 
@@ -836,7 +909,8 @@ for(i in 1:length(t2_20_geoids)){
 }
 
 names(table_2_20) <- c("Location", "Number of Rental Households", 
-                       "Renters Burdened", "% Renters Burdened", "Number of Owner Households", "Owners Burdened", "% Owners Burdened")
+                       "Renters Burdened", "% Renters Burdened", "Number of Owner Households", "Owners Burdened", "% Owners Burdened",
+                       "Total Households", "Households Burdened", "% Households Burdened")
 
 write.csv(table_2_20, "data/table_2_20.csv")
 
@@ -847,16 +921,21 @@ fig_2_4_long <- gather(fig_2_4, type, percent, '% Renters Burdened':'% Owners Bu
 
 plot <- ggplot(fig_2_4_long, aes(factor(Location, level = t2_20_loc), as.numeric(percent), fill=type))
 plot <- plot + geom_bar(stat = "identity", position = 'dodge') + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+  scale_y_continuous(breaks=c(0, 10, 20, 30, 40, 50, 60)) + 
+  scale_fill_discrete(name = "Household Type", labels = c("Renters", "Owners")) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) + 
+  xlab("Location") + ylab("% Cost-Burdened")
 plot
 
+
 ### Table 2.21a Definition of Income Categories
+# https://www.huduser.gov/portal/datasets/il/il2023/select_Geography.odn
 # North Adams Median Family income - HUD just gives the same number for each city in Berkshire county, 
 # excluding Pittsfield, and a few others
 # 2022 is 92,100
 # 2024 is 105,700
 
-na_ami_24 <- 105700
+na_ami_24 <- 101522
 middle_income <- paste0(1 + na_ami_24, " - ", na_ami_24 * 1.2)
 moderate_income <- paste0(1 + na_ami_24 * .8, " - ", na_ami_24)
 low_income <- paste0(1+ na_ami_24 * .5, " - ", na_ami_24 * .8)
@@ -880,8 +959,9 @@ table_2_21a <- data.frame(Income.Category = income_categories,
 write.csv(table_2_21a, "data/table_2_21a.csv")
 
 ### Table 2.21b Affordable Housing Supply Analysis for North Adams
-# Total households is very similar to 2.18 calculations, except that they use median 
-# household income for a two-person household, whereas this is just AMI
+# Total households is very similar to table 2.18 calculations, except that 2.18 
+# uses median household income for a two-person household, whereas this is just AMI
+# NEED bucket_vars, upper_limits, income_buckets from 2.18 
 
 top_limit_per <- c(1.2, 1, .8, .5, .3)
 affordable_monthly_housing <- c()
@@ -1027,7 +1107,6 @@ affordable_mort_res <- get_affordable_units(mort_buckets, owner_bucket_res)
 
 tot_units <- rev(affordable_rent_res) + rev(affordable_mort_res)
 
-# Need to add a totals row 
 table_2_21b <- data.frame(Income.Category = income_categories,
                           Affordable.Monthly.Housing.Costs = affordable_monthly_housing,
                           Affordable.Rental.Units.Available = rev(affordable_rent_res),
@@ -1176,23 +1255,45 @@ write.csv(table_3_6, "data/table_3_6.csv")
 rent <- c("No rent paid", "Less than $500", "$500 to $999", "$1,000 to $1,499", "$1,500 to $1,999", 
           "$2,000 to $2,499", "$2,500 to $2,999", "$3,000 or more")
 rent_vars <- c("DP04_0135", "DP04_0127", "DP04_0128", "DP04_0129", "DP04_0130", "DP04_0131",
-               "DP04_0132", "DP04_0133")
+               "DP04_0132", "DP04_0133", "DP04_0126")
 rent_res = get_acs_vec(vars_vec = rent_vars)
 
+num_renters <- rent_res[9]
+
 table_3_7 <- data.frame(rent = rent, 
-                        number.of.renter.households = rent_res, 
-                        percent.renter.households = rent_res/num_renters *100)
+                        number.of.renter.households = rent_res[1:8], 
+                        percent.renter.households = rent_res[1:8]/num_renters *100)
 
 median_rent <- get_acs_vec(vars_vec = c("DP04_0134"))
 
 write.csv(table_3_7, "data/table_3_7.csv")
 
+### Figure 3.1 Changing Median Rents
+earliest_year <- 2009
+years <- seq(earliest_year, year, by=1)
+rents <- c()
+
+var_2014_and_before <- "DP04_0132"
+var_2015_and_later <- "DP04_0134"
+
+for(i in years) {
+  var <- ifelse(i < 2015, var_2014_and_before, var_2015_and_later)
+  rents <- c(rents, get_acs_vec(vars_vec = c(var), yr = i))
+}
+
+fig_3_1 <- data.frame(year = years, rent = rents)
+plot <- ggplot(fig_3_1, aes(x=year, y = rent)) + 
+  geom_line() + xlab("Year") + ylab("Median Rent")
+plot
+
+### Table 3.8 Change in Gross Rent Paid
+
 rent_comp = get_acs_vec(vars_vec = rent_vars, yr = comparison_year)
 
 table_3_8 <- data.frame(gross.rent= rent, 
-                        number.of.renters.comp = rent_comp,
-                        number.of.renters.current = rent_res,
-                        percent.change = percent_change(rent_comp, rent_res))
+                        number.of.renters.comp = rent_comp[1:8],
+                        number.of.renters.current = rent_res[1:8],
+                        percent.change = percent_change(rent_comp[1:8], rent_res[1:8]))
 
 write.csv(table_3_8, "data/table_3_8.csv")
 
@@ -1239,7 +1340,7 @@ renter_occupied <- get_acs_vec(vars_vec = c("S2504_C05_001"))
 SHI <- 866
 num_units <- c(renter_occupied, SHI)
 
-table_3_10 <- data.frame(. = c("Total Rental Units, (2022 ACS)", "Subsidized Rental Units (DHCD 2023 SHI)"),
+table_3_10 <- data.frame(. = c("Total Rental Units, (2023 ACS)", "Subsidized Rental Units (DHCD 2023 SHI)"),
                          number.of.units = num_units,
                          percent.of.total = num_units/renter_occupied *100)
 
@@ -1269,7 +1370,294 @@ table_3_11 <- data.frame( . = c("North Adams", "Berkshire County", "Massachusett
 
 write.csv(table_3_11, "data/table_3_11.csv")
 
-#### Skipping a chunk!
+### Table 3.13 Rents as a Percentage of Income
+first_col <- c("Total Renter Households", "Paying 30% of more of income in rent")
+renter_vars <- c("DP04_0047", "DP04_0141", "DP04_0142")
+
+comp_res <- get_acs_vec(vars_vec = renter_vars, yr  =comparison_year)
+comp_res <- c(comp_res[1], comp_res[2] + comp_res[3])
+res <- get_acs_vec(vars_vec = renter_vars)
+res <- c(res[1], res[2] + res[3])
+
+table_3_13 <- data.frame(. = first_col,
+                         comp.year = comp_res,
+                         percent.total.comp = comp_res/comp_res[1] *100,
+                         current.year = res,
+                         percent.total = res/res[1] *100,
+                         Percent.Change = percent_change(comp_res, res))
+
+write.csv(table_3_13, "data/table_3_13.csv")
+
+### Table 3.14 Relationships of Rents to Local Wages
+job_types <- c("All Jobs", "Service-Producing Jobs", "Goods-Producing Jobs")
+
+# manually pulled from here - https://lmi.dua.eol.mass.gov/lmi/employmentandwages#
+all_avg_monthly_wage = (1010 * 52)/12
+goods_avg_monthly_wage = (1075 * 52)/12
+service_avg_monthly_wage = (1006 * 52)/12
+
+avg_monthly_wage <- c(all_avg_monthly_wage, goods_avg_monthly_wage, service_avg_monthly_wage)
+affordable_rent <- avg_monthly_wage * 0.3
+
+median_rent <- get_acs_vec(vars_vec = c("DP04_0134"))
+
+table_3_14 <- data.frame (Job.Type = job_types, 
+                          Avg.Monthly.Wage = avg_monthly_wage,
+                          Affordable.Rent.At.30 = affordable_rent,
+                          Median.Gross.Rent = median_rent,
+                          Affordability.Gap = affordable_rent - median_rent)
+
+write.csv(table_3_14, "data/table_3_14.csv")
+
+### Table 4.1 Types of Buildings of Ownership Housing Unit
+building_type <- c("Single-Family Unit", "2-4 Units", "5-9 Units",
+                   "10+ Units", "Mobile Homes", "Total Units")
+# B25032_003 - 1 detached
+# B25032_004 - 1 attached
+# B25032_005 - 2
+# B25032_006 - 3 to 4
+# B25032_007 - 5 to 9
+# B25032_008 - 10 to 19
+# B25032_009 - 20 to 49
+# B25032_010 - 50 + 
+# B25032_011 - mobile home
+
+building_type_vars <- c("B25032_003", "B25032_004", 
+                        "B25032_005", "B25032_006", "B25032_007",
+                        "B25032_008", "B25032_009", "B25032_010", 
+                        "B25032_011")
+
+building_type_com_res <- get_acs_vec(vars_vec = building_type_vars, yr = comparison_year)
+building_type_com_res <- c(building_type_com_res[1] + building_type_com_res[2],
+                           building_type_com_res[3] + building_type_com_res[4],
+                           building_type_com_res[5], building_type_com_res[6] + 
+                             building_type_com_res[7] + building_type_com_res[8],
+                           building_type_com_res[9], sum(building_type_com_res))
+
+building_type_res <- get_acs_vec(vars_vec = building_type_vars)
+building_type_res <- c(building_type_res[1] + building_type_res[2],
+                       building_type_res[3] + building_type_res[4],
+                       building_type_res[5], building_type_res[6] + 
+                         building_type_res[7] + building_type_res[8],
+                       building_type_res[9], sum(building_type_res))
+
+table_4_1 <- data.frame(Building.Type = building_type,
+                        Comp.Year = building_type_com_res,
+                        Year = building_type_res,
+                        Percent.of.Total = building_type_res/building_type_res[6] *100,
+                        Percent.Change = percent_change(building_type_com_res, building_type_res))
+
+write.csv(table_4_1, "data/table_4_1.csv")
+
+### Table 4_6
+seasonal_housing_var <- c("B25004_006")
+table_4_6 <- data.frame(. = c("Number of Units"),
+                        y1990 = 19,
+                        y2000 = 27, 
+                        y2010 = 71, 
+                        y2020 = get_acs_vec(vars_vec = seasonal_housing_var, yr = census_year),
+                        ycurrent = get_acs_vec(vars_vec = seasonal_housing_var))
+
+write.csv(table_4_6, "data/table_4_6.csv")
+
+figure_4_2 <- data.frame(year = c(1990, 2000, 2010, 2020, year), 
+           units = as.numeric(table_4_6[1,2:6]))
+
+ggplot(figure_4_2, aes(x = year, y = units)) + geom_line() +
+  xlab("Year") + ylab("Number of Units")
+
+### Table 4.7 Affordability of Homes
+locations <- c("Berkshire County", "North Adams", "Williamstown", 
+               "Clarksburg", "Florida", "Savoy", "Adams", "New Ashford")
+
+median_income_var <- c("S1901_C01_012")
+
+berkshire_county_median <- get_acs_vec(geography = "county",
+                                       geoid = county_geo_id, 
+                                       vars_vec = median_income_var)
+
+median_incomes <- c(berkshire_county_median)
+
+for (i in 1:length(geo_ids)){
+  res <- get_acs_vec(vars_vec = c("S1901_C01_012"), geoid = geo_ids[i])
+  median_incomes <- c(median_incomes, res)
+}
+
+## assuming $500 monthly debt, $10k down payment
+## 30 year terms, 4.5% interest rate
+## property tax of $3,000
+affordable_price <- c(292463, 175465, 482268,
+                      310564, 369893, 202627,
+                      205277, 344577)
+median_sales_price <- c(NA, 217250, 481500, 260500,
+                        NA, 154950, 209000, 212500)
+
+table_4_7 <- data.frame(Locations = locations,
+                        Median.Income = median_incomes,
+                        Affordable.Price = affordable_price,
+                        Median.Sales.Price = median_sales_price, 
+                        Affordability.Gap = affordable_price - median_sales_price)
+
+write.csv(table_4_7, "data/table_4_7.csv")
+
+### Table 4.8 Selected Monthly Owner Costs as a Percentage of Household Income
+smocapi <- c("Less than 20%", "20 to 24.9%", "25.0 to 29.9%", 
+             "30.0 to 34.9%", "35.0 to 39.9%", "40.0 to 49.9%", 
+             "50.0% or more", "Total")
+
+# B25091_003 - Less than 10%
+# B25091_004 - 10% to 14.9%
+# B25091_005 - 15 - 19.9%
+# rest line up with the table
+smocapi_vars <- c("B25091_003", "B25091_004", "B25091_005",
+                  "B25091_006", "B25091_007", "B25091_008",
+                  "B25091_009", "B25091_010", "B25091_011")
+
+smocapi_comp_res <- get_acs_vec(vars_vec = smocapi_vars, 
+                                yr = comparison_year)
+smocapi_comp_res <- c(smocapi_comp_res[1] + smocapi_comp_res[2] + smocapi_comp_res[3],
+                      smocapi_comp_res[4:length(smocapi_comp_res)], sum(smocapi_comp_res))
+
+smocapi_res <- get_acs_vec(vars_vec = smocapi_vars)
+smocapi_res <- c(smocapi_res[1] + smocapi_res[2] + smocapi_res[3],
+                 smocapi_res[4:length(smocapi_res)], sum(smocapi_res))
+
+table_4_8 <- data.frame(Percent.of.Income.Paid.Towards.Housing = smocapi,
+                        ycomp = smocapi_comp_res,
+                        y = smocapi_res,
+                        Percent.of.Total = smocapi_res/smocapi_res[length(smocapi_res)] *100,
+                        Percent.Change = percent_change(smocapi_comp_res, smocapi_res))
+
+write.csv(table_4_8, "data/table_4_8.csv")
+
+### Table 4.9 Household Incomes of Owner in North Adams
+
+owner_household_income <- c("Less than $5,000", "$5,000 to $9,999", "$10,000 to $14,999",
+                             "$15,000 to $19,999", "$20,000 to $24,999", "$25,000 to $34,999", 
+                             "$35,000 to $49,999", "$50,000 to $74,999", "$75,000 to $99,999",
+                             "$100,000 to $149,999", "$150,000 or more")
+
+owner_household_income_vars <- c("B25118_003", "B25118_004", "B25118_005", "B25118_006", 
+                                  "B25118_007", "B25118_008", "B25118_009", "B25118_010", 
+                                  "B25118_011", "B25118_012", "B25118_013")
+
+owner_household_income_res <- get_acs_vec(vars_vec = owner_household_income_vars)
+
+table_4_9 <- data.frame( household.income = owner_household_income,
+                         number.of.owner.occupied.household = owner_household_income_res,
+                         percent.owner.occupied = owner_household_income_res/sum(owner_household_income_res) *100)
+
+write.csv(table_4_9, "data/table_4_9.csv")
+
+### Table 4.10 Cost to buy a starter home in North Adams with a 20% Down Payment
+
+### This is the 25th quartile of homes listed from Table 4.2
+getPaymentAmount <- function (home_price = 185000, down_payment_per = 0.2, 
+                              interest) {
+  down_payment <- home_price * down_payment_per
+  loan_amount <- home_price - down_payment
+  
+  monthly_rate = interest/12
+  r <- (1+ monthly_rate) ^ 360 - 1
+  payment <- loan_amount * monthly_rate * (r+ 1)/r
+  
+  return(payment)
+}
+
+monthly_mortgage_20 <-c()
+
+for(i in 1:9){
+  monthly_mortgage_20 <- c(monthly_mortgage_20, getPaymentAmount(interest = i /100))
+}
+
+monthly_income_needed <- monthly_mortgage_20 / 0.3
+annual_income_needed <- monthly_income_needed * 12
+
+# "Less than $5,000", "$5,000 to $9,999", "$10,000 to $14,999",
+# "$15,000 to $19,999", "$20,000 to $24,999", "$25,000 to $34,999", 
+# "$35,000 to $49,999", "$50,000 to $74,999", "$75,000 to $99,999",
+# "$100,000 to $149,999", "$150,000 or more"
+
+renter_household_income_vars <- c("B25118_015", "B25118_016", "B25118_017", "B25118_018", 
+                                  "B25118_019", "B25118_020", "B25118_021", "B25118_022", 
+                                  "B25118_023", "B25118_024", "B25118_025")
+lower_limits <-  c(0, 4999, 9999, 14999, 19999, 
+                   24999, 34999, 49999, 74999, 
+                   99999, 149999)
+
+income_buckets <- data.frame( var.names = renter_household_income_vars,
+                              lower.limits = lower_limits)
+
+renter_household_res <- get_acs_vec(vars_vec = renter_household_income_vars)
+
+hh_above_income <- function(income, res){
+  hhs <- 0
+  
+  for(i in 1:length(renter_household_income_vars)){
+    if(income < income_buckets$lower.limits[i]){
+      ## if lower_limit is greater than income required, all hhs
+      ## in that bucket should be added
+        hhs <- hhs + res[i]
+      }  else if (income < income_buckets$lower.limits[i + 1]) {
+      ## if upper limit of the income bucket is greater than the 
+      ## income required, assume even distribution of hhs, and figure
+      ## out how many are above that income
+      ## this would throw an error for the uppermost bucket, but 
+      ## that doesn't matter for this use
+        bucket_size <- income_buckets$lower.limits[i + 1] - income_buckets$lower.limits[i]
+        distance_into_bucket <- income - income_buckets$lower.limits[i]
+        percent_into_bucket <- 1 - distance_into_bucket/ bucket_size
+        hhs <- hhs + (percent_into_bucket * res[i])
+    }
+  }
+  
+  return (hhs)
+}
+
+num_renters <- c()
+
+for(i in 1:length(annual_income_needed)){
+  num_renters <- c(num_renters, hh_above_income(income = annual_income_needed[i], renter_household_res))
+}
+
+tot_renters <- sum(renter_household_res)
+percent_renters <- num_renters/tot_renters * 100
+
+table_4_10 <- data.frame( interest.rate = 1:9, 
+                          monthly.mortgage = monthly_mortgage_20,
+                          monthly.income.needed = monthly_income_needed,
+                          annual.income.needed = annual_income_needed,
+                          percent.of.renters = percent_renters)
+write.csv(table_4_10, "data/table_4_10.csv")
+
+### Table 4.11 Cost to buy a starter home in North Adams with a 10% Down Payment
+### This table uses functions from 4.10 and renter_household_res
+monthly_mortgage_10 <-c()
+
+for(i in 1:9){
+  monthly_mortgage_10 <- c(monthly_mortgage_10, getPaymentAmount(interest = i /100, 
+                                                                 down_payment_per = 0.1))
+}
+
+monthly_income_needed <- monthly_mortgage_10 / 0.3
+annual_income_needed <- monthly_income_needed * 12
+
+num_renters <- c()
+
+for(i in 1:length(annual_income_needed)){
+  num_renters <- c(num_renters, hh_above_income(income = annual_income_needed[i], renter_household_res))
+}
+
+tot_renters <- sum(renter_household_res)
+percent_renters <- num_renters/tot_renters * 100
+
+table_4_11 <- data.frame( interest.rate = 1:9, 
+                          monthly.mortgage = monthly_mortgage_10,
+                          monthly.income.needed = monthly_income_needed,
+                          annual.income.needed = annual_income_needed,
+                          percent.of.renters = percent_renters)
+write.csv(table_4_11, "data/table_4_11.csv")
+
 
 ### Table 5.1 Age Distribution of North Adams Senior Householders by Home Type
 hh_age <- c("60-64 years old", "65-74 years old", "75-84 years old",
@@ -1342,10 +1730,10 @@ write.csv(table_5_3, "data/table_5_3.csv")
 ### Table 5.4 Tenure by Year Senior (65+) Householder
 year_moved_into_home <- c("2021 or later", "2018 to 2020", "2010 to 2017",
                           "2000 to 2009", "1990 to 1999", "1989 or earlier", "Total")
-num_renters_vars <- c("B25128_040", "B25128_041", "B25128_042", "B25128_043",
-                      "B25128_044", "B25128_045")
-num_owners_vars <- c("B25128_018", "B25128_019", "B25128_020", "B25128_021",
-                     "B25128_022", "B25128_023")
+num_renters_vars <- c("B25128_040", "B25128_041", "B25128_042", 
+                      "B25128_043","B25128_044", "B25128_045")
+num_owners_vars <- c("B25128_018", "B25128_019", "B25128_020", 
+                     "B25128_021", "B25128_022", "B25128_023")
 num_renters_res <- get_acs_vec(vars_vec = num_renters_vars)
 total_renters <- sum(num_renters_res)
 num_renters_res <- c(num_renters_res, total_renters)
@@ -1391,9 +1779,8 @@ table_5_6 <- data.frame(Amount.Spent.On.Housing = amount_spent_on_housing,
 write.csv(table_5_6, "data/table_5_6.csv")
 
 ### Table 5.7 Seniors with Disabilities or Limitations
-disability_or_limitation <- c("Hearing Difficulty", "Vision Difficulty",
-                              "Cognitive Difficulty", "Ambulatory Difficulty",
-                              "Self-Care Difficulty", "Independent Living Difficulty",
+disability_or_limitation <- c("Hearing Difficulty", "Vision Difficulty", "Cognitive Difficulty", 
+                              "Ambulatory Difficulty","Self-Care Difficulty", "Independent Living Difficulty",
                               "Total")
 
 disability_or_limitation_vars <- c("S1810_C02_026", "S1810_C02_036", "S1810_C02_044",
@@ -1410,16 +1797,12 @@ table_5_7 <- data.frame(Disability.or.Limitation = disability_or_limitation,
 write.csv(table_5_7, "data/table_5_7.csv")
 
 ### Table 6.1 Residents with Disabilities or Limitations
-disability_or_limitation <- c("Hearing Difficulty", "Vision Difficulty", 
-                              "Cognitivie Difficulty", "Ambulatory Difficulty", 
-                              "Self-Care Difficulty", "Independent Living Difficulty",
-                              "Total")
-disability_or_limitation_vars <- c("S1810_C02_019", "S1810_C02_029",
-                                   "S1810_C02_039", "S1810_C02_047",
-                                   "S1810_C02_055", "S1810_C02_063")
+disability_or_limitation <- c("Hearing Difficulty", "Vision Difficulty", "Cognitivie Difficulty", 
+                              "Ambulatory Difficulty", "Self-Care Difficulty", "Independent Living Difficulty")
+disability_or_limitation_vars <- c("S1810_C02_019", "S1810_C02_029","S1810_C02_039", 
+                                   "S1810_C02_047","S1810_C02_055", "S1810_C02_063")
 
 disability_or_limitation_res <- get_acs_vec(vars_vec = disability_or_limitation_vars)
-disability_or_limitation_res <- c(disability_or_limitation_res, sum(disability_or_limitation_res))
 
 total_population <- get_acs_vec(vars_vec = c("S1810_C01_001"))
 
